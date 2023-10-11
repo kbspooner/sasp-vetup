@@ -50,7 +50,7 @@ convergence scripts
 
 Several scripts automate convergence, however I would recommend soon-to-
 be-Dr. (and quickly thereafter Prof.) Sean Kavanagh's
-[vaspup2.0](<https://github.com/kavanase/vaspup2.0) instead.
+[vaspup2.0](https://github.com/kavanase/vaspup2.0) instead.
 
 Installation
 ------------
