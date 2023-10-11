@@ -1,0 +1,363 @@
+#!/usr/bin/env python3
+# NCORE can be set with machine-specific defaults if desired (from line
+# 73, which can be set with "export computer=computer_name" (e.g. in
+# your ~/.bashrc).
+
+## Inputs
+
+import argparse
+
+parser = argparse.ArgumentParser(
+         description='Writes an INCAR.')
+parser.add_argument('functional', metavar='functional',
+                    help='XC functional. Currently supports HF, HSE, '
+                         'PBE0, PBEsol/ PS, SCAN and TB/ mBJ')
+parser.add_argument('calculation', metavar='calculation',
+                    help='the type of calculation. Options: band, '
+                         'conv(ergence), DFPT, DoS, findiff '
+                         '(dielectric response), geo(metry), opt(ics) '
+                         'and phon(ons)')
+parser.add_argument('-a', '--algo', metavar='ALGO',
+                    help='electronic relaxation algorithm, default: '
+                         'Normal for GGA, All for hybrid')
+parser.add_argument('--aexx', metavar='AEXX', type=float, default=0.25,
+                    help='proportion of HF in hybrid calculations, '
+                         'default: 0.25')
+parser.add_argument('-b', '--bands', metavar='NBANDS', type=int,
+                    help='number of bands')
+parser.add_argument('-c', '--computer', metavar='computer',
+                    help='override default computer, which can be set '
+                         'with "export computer=computer_name"')
+parser.add_argument('-e', '--encut', metavar='ENCUT', type=float,
+                    help='plane wave cutoff value in eV')
+parser.add_argument('-f', '--factor', metavar='factor', type=float,
+                    nargs='+',
+                    help='nbands factor, useful for soc and supercells')
+parser.add_argument('-i', '--isif', metavar='ISIF', type=int, default=3,
+                    help='ionic relaxation scheme, default: 3 (all)')
+parser.add_argument('--ibrion', metavar='IBRION', type=int, default=1,
+                    help='ionic relaxation algorithm, default: 1 '
+                         '(quasi-Newton)')
+parser.add_argument('--isym', metavar='ISYM', type=int,
+                    help='symmetry scheme, overrides defaults')
+parser.add_argument('-k', '--kpar', metavar='KPAR', type=int,
+                    help='k-point parallelism, default:1')
+parser.add_argument('-n', '--nsw', metavar='NSW', type=int,
+                    default=200,
+                    help='number of ionic steps')
+parser.add_argument('--ncore', metavar='NCORE', type=int,
+                    help='number of bands per core, can set defaults '
+                         'if the shell variable computer is set. '
+                         'general default: 8')
+parser.add_argument('-q', '--chgcar', action='store_false',
+                    help='turns off CHGCAR writing')
+parser.add_argument('-s', '--soc', action='store_true',
+                    help='turns on spin orbit coupling')
+parser.add_argument('--system', metavar='name',
+                    help='system name, defaults to cwd')
+parser.add_argument('-t', '--tight', action='store_true',
+                    help='tightens relaxation parameters')
+parser.add_argument('-w', '--wavecar', action='store_false',
+                    help='turns off WAVECAR writing')
+parser.add_argument('-y', '--yaml', metavar='settings.yaml', nargs='+',
+                    help='settings file and optional sub-dictionaries '
+                         'key. Later sub-dictionaries overwrite '
+                         'earlier ones. Currently supports encut, '
+                         'kpar, nbands and ncore')
+args = parser.parse_args()
+
+import os
+
+# Defaults
+
+default = {'encut':  {'default': -1},
+
+           'kpar':   {'default': 1},
+
+           'nbands': {'default': -1},
+
+           'ncore':  {'archer':    6,
+                      'bluebear': 12,
+                      'kathleen': 10,
+                      'michael':  10,
+                      'myriad':    6,
+                      'young':     5,
+                      'a':        10,
+                      'k':         8,
+                      'default':   8}}
+
+if args.computer is None:
+    try:
+        computer = os.environ['computer'].lower()
+    except Exception:
+        pass
+else:
+    computer = args.computer.lower()
+
+if args.yaml is not None:
+    import yaml
+    with open(args.yaml[0], 'r') as f:
+        settings = yaml.safe_load(f)
+    if len(args.yaml) > 1:
+        for key in args.yaml[1:]:
+            if key in settings:
+                for k in settings[key]:
+                    settings[k] = settings[key][k]
+            else:
+                print('{} is not in {}.'.format(key, args.yaml[0]))
+else:
+    settings = None
+
+def get(input, name, settings=settings, computer=computer, default=default):
+    """Gets a value for a property.
+
+    From (in order of precedence) the command line, settings file,
+    computer default or general default (defined from line 73).
+
+    Args:
+        input : str
+            command line input.
+        name : str
+            name of property (in settings and default).
+        settings : dict
+            settings file.
+        computer : str
+            name of computer.
+        default : dict
+            default values.
+
+    Returns:
+        :obj:'str': value.
+    """
+
+    if input is None:
+        if settings is not None and name in settings:
+            output = settings[name]
+        else:
+            try:
+                output = default[name][computer]
+            except Exception:
+                output = default[name]['default']
+    else:
+        output = input
+
+    return output
+
+e = get(args.encut, 'encut')
+encut = '!' if e == -1 else ''
+if args.calculation.lower() == 'geo': e *= 1.3
+
+kpar = get(args.kpar, 'kpar')
+
+nbands = get(args.bands, 'nbands')
+bands = '!' if nbands == -1 else ''
+if args.factor is not None:
+    from numpy import prod
+    nbands *= prod(args.factor)
+
+ncore = get(args.ncore, 'ncore')
+
+# Functionals
+
+hfs = ['hf', 'hse', 'pbe0', 'h6']
+ggas = ['lda', 'mbj', 'pbe', 'pbesol', 'ps', 'scan', 'tb']
+
+hybrid = ''
+isym = '3'
+algo = 'Normal'
+if args.functional.lower() in hfs:
+  hybrid = '!'
+  isym = '3'
+  algo = 'All'
+elif args.functional.lower() in ggas:
+  isym = '2'
+  algo = 'Normal'
+if args.algo is not None:
+    algo = args.algo
+
+if args.soc:
+  isym = '0'
+
+## Relaxation
+
+ediff = '5'
+ediffg = '-0.01'
+prec = 'Normal'
+
+if args.calculation.lower() == 'phon': args.tight = True
+if args.tight:
+  ediffg = '-1E-4'
+  isym = '0'
+  ediff = '8'
+  prec = 'Accurate'
+
+## Symmetry
+
+if args.calculation.lower() in ['dfpt', 'fd']:
+    isym = '-1'
+
+if args.isym is not None:
+    isym = args.isym
+
+## Miscellaneous
+
+if args.system is None:
+    args.system = os.getcwd()
+
+## INCAR Pieces
+
+INCAR =    ['SYSTEM = {}'.format(args.system),
+
+            '\nstart parameters',
+            '  NWRITE = 2             ! Information output level',
+            '  ISTART = 1             ! Read existing wavefunction, if there',
+            '  INIWAV = 1             ! Random initial wavefunction, otherwise',
+            '  ICORELEVEL = 1         ! Print core levels',
+
+            '\nparallelisation',
+            '  NCORE = {:<5}          ! Number of cores per orbital'.format(ncore),
+            '  KPAR = {:<5}           ! Number of kpoints parallelised'.format(kpar),
+
+            '\nmiscellaneous',
+            '  PREC = {:<8}        ! Precision level'.format(prec),
+            '  {}ENCUT = {:<11.0f}    ! Plane wave cutoff'.format(encut,e),
+            '  {}NBANDS = {:<11.0f}   ! Number of bands'.format(bands,nbands),
+            '  NELM = 200             ! Max SCF steps',
+            '  NELMIN = 2             ! Min SCF steps',
+            '  EDIFF = 1E-{}           ! SCF convergence'.format(ediff),
+            '  LASPH = .TRUE.         ! Non-spherical elements (d/f convergence)',
+            '  ISYM = {:<5}           ! Symmetry: 0-none; 2=GGA; 3=hybrids'.format(isym),
+            '  NBLOCK = 1             ! Update XDATCAR every X steps',
+            '  KBLOCK = 40            ! Update PCDAT and DOSCAR every X*NBLOCK steps',
+            '  IWAVPR = 1             ! Charge density extrapolation',
+            '  LVHAR = .TRUE.         ! Ionic and Hartree potential',
+            '  ALGO = {:<9}       ! Electronic relaxation algorithm\n'.format(algo)]
+
+functionals = {
+'hf':      ['\nHartree-Fock',
+            '  LHFCALC = .TRUE.       ! Activate HF',
+            '  AEXX = 1               ! 100 % HF',
+            '  ALDAC = 0              ! No LDA correllation',
+            '  AGGAC = 0              ! No correllation correction\n'],
+
+'hse':     ['\nHeyd-Scuseria-Ernzerhof',
+            '  GGA = PE               ! PBE-based',
+            '  LHFCALC = .TRUE.       ! Activate HF',
+            '  AEXX = {:<8.2f}        ! Proportion HF exchange'.format(args.aexx),
+            '  HFSCREEN = 0.208       ! Screened exchange\n'],
+
+'lda':     [],
+
+'pbe':     ['\nPerdew-Burke-Ernzerhof',
+            '  GGA = PE               ! PBE-based\n'],
+
+'pbe0':    ['\nPerdew-Burke-Ernzerhof 0',
+            '  GGA = PE               ! PBE based',
+            '  LHFCALC = .TRUE.       ! Activate HF',
+            '  PRECKFOCK = FAST       ! HF FFT grid',
+            '  AEXX = {:<8.2f}        ! Proportion HF exchange\n'.format(args.aexx)],
+
+'pbesol':  ['\nPerdew-Burke-Ernzerhof for solids',
+            '  GGA = PS               ! PBEsol\n'],
+
+'scan':    ['\nStrongly constrained and appropriately normed semilocal density functional',
+            '  METAGGA = SCAN         ! SCAN',
+            '  LMIXTAU = .TRUE.       ! Kinetic energy mixing\n'],
+
+'tb':      ['\nTran-Blaha (modified Becke-Johnson)',
+            '  METAGGA = MBJ          ! TB/mBJ\n']}
+
+functionals['h6'] = functionals['hse']
+functionals['p0'] = functionals['pbe0']
+functionals['ps'] = functionals['pbesol']
+functionals['mbj'] = functionals['tb']
+
+calculations = {
+'band':    ['\nband calculation',
+            '  LORBIT = 11            ! PAW radii for projected DOS',
+            '  ISMEAR = 0             ! Gaussian smearing',
+            '  SIGMA = 0.2            ! Smearing value in eV',
+            '  NEDOS = 2000           ! DOSCAR points',
+            '  {}ICHARG = 11            ! Band structure calculation\n'.format(hybrid)],
+
+'conv':    ['\nconvergence testing',
+            '  NSW = 0                ! No relaxation\n'],
+
+'dfpt':    ['\ndensity functional perturbation theory',
+            '  IBRION = 8             ! DFPT Phonons',
+            '  NSW = 1                ! One step',
+            '  ISIF = 2               ! Ionic relaxation only',
+            '  LEPSILON = .TRUE.      ! Calculate dielectric response',
+            '  LREAL = .FALSE.        ! Reciprocal space projections for accurate forces\n'],
+
+'dos':     ['\ndensity of states',
+            '  LORBIT = 11            ! PAW radii for projected DOS',
+            '  ISMEAR = 0             ! Gaussian smearing',
+            '  SIGMA = 0.2            ! Smearing value in eV',
+            '  NEDOS = 2000           ! DOSCAR points\n'],
+
+'findiff': ['\nfinite differences dielectric response',
+            '  IBRION = 6             ! Finite differences phonons',
+            '  NSW = 1                ! One step',
+            '  ISIF = 3               ! Ionic relaxation only',
+            '  LCALCEPS = .TRUE.      ! Calculate dielectric response',
+            '  LREAL = .FALSE.        ! Reciprocal space projections for accurate forces\n'],
+
+'geo':     ['\ngeometry relaxation',
+            '  EDIFFG = {:<5}         ! + ionic energy convergence, - ionic force convergence'.format(ediffg),
+            '  NSW = {:<5}            ! Max ionic steps'.format(args.nsw),
+            '  IBRION = {:<5}         ! Algorithm: 0-MD; 1-Quasi-New; 2-CG; 3-damped MD'.format(args.ibrion),
+            '  ISIF = {:<5}           ! Stress/relaxation: 2-Ions, 3-Shape/Ions/V, 7-Vol'.format(args.isif),
+            '  ISMEAR = 0             ! Gaussian smearing',
+            '  SIGMA = 0.2            ! Smearing value in eV',
+            '  ADDGRID = .{}.       ! Denser grid\n'.format(str(args.tight).upper())],
+
+'opt':     ['\noptics',
+            '  ISMEAR = -5            ! Gaussian smearing; metals:1, optics:-5',
+            '  CSHIFT = 1E-6          ! Reduce smearing for optics',
+            '  NEDOS = 2000           ! DOSCAR points',
+            '  LOPTICS = .TRUE.       ! Optical calculations\n'],
+
+'phon':    ['\nphonons',
+            '  EDIFF  = 1E-8          ! + ionic energy convergence, - ionic force convergence',
+            '  ISMEAR = 0             ! Gaussian smearing; metals:1, optics:-5',
+            '  SIGMA = 0.2            ! Smearing value in eV',
+            '  LWAVE = .FALSE.        ! No WAVECAR',
+            '  LCHARG = .FALSE.       ! No CHARGCAR\n']}
+
+calculations['fd'] = calculations['findiff']
+
+soc =      ['\nspin-orbit coupling',
+            '  LSORBIT = .TRUE.       ! Spin-orbit coupling\n']
+
+output  =  ['\noutputs',
+            '  LCHARG = .{}.        ! Sets CHGCAR writing'.format(str(args.chgcar).upper()),
+            '  LWAVE = .{}.         ! Sets WAVECAR writing'.format(str(args.wavecar).upper())]
+
+## Writing
+
+with open('INCAR','w') as f:
+    f.write('\n'.join(INCAR))
+    if args.functional.lower() in functionals:
+        f.write('\n'.join(functionals[args.functional.lower()]))
+    else:
+        raise Exception('Invalid or unsupported calculation\n'
+                        'Currently supports HF, HSE/ H6, PBE, PBE0/ P0, '
+                        'PBEsol/ PS, SCAN and TB/ mBJ.')
+
+    if args.calculation.lower() in calculations:
+        f.write('\n'.join(calculations[args.calculation.lower()]))
+    else:
+        raise Exception('Invalid or unsupported calculation.\n'
+                        'Currently supports band, conv(ergence), DFPT, '
+                        'DoS, fd/ findiff (dielectric response), '
+                        'geo(metry), opt(ics) and phon(ons).')
+
+    if args.soc:
+        f.write('\n'.join(soc))
+
+    if args.calculation.lower() != 'phon':
+        f.write('\n'.join(output))
+
+if args.functional.lower() == 'lda':
+    print('Remember to use LDA POTCARs!')

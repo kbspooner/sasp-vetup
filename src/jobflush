@@ -1,0 +1,60 @@
+#!/bin/bash
+
+# A script to flush completed calculations into findir from the head (node).
+
+if [[ ${@} =~ '--help' ]] || [[ ${@} =~ '-h' ]]; then
+    echo "Flushes completed jobs into fin to save hpc time"
+    echo ""
+    echo "Usage: jobflush"
+    echo ""
+    exit 0
+fi
+
+wd=$(pwd)
+waittime=3 # ~longest step in calculation (minutes)
+findir="fin"
+
+archive_command() {
+    cd $1 || continue
+    rm CHG* CONTCAR DOSCAR EIGENVAL IBZKPT INCAR KPOINTS OSZICAR OUTCAR PCDAT POTCAR REPORT WAVECAR XDATCAR
+    minimise-vasprun vasprun.xml >> vasp_out
+    cd - || break 2
+    mv ${fol} ${findir}
+    echo "$1 archived!" >> ${wd}/job.log
+}
+
+fols=($(find -maxdepth 1 -type d -not -name $findir -not -name .))
+fols=($(shuf -e "${fols[@]}"))
+
+if [[ ${#fols[@]} -eq 0 ]]; then
+    echo No jobs found!
+    exit 0
+fi
+
+if [[ ! -d $findir ]]; then
+    mkdir $findir
+fi
+
+for fol in "${fols[@]}"; do
+    if [[ -f "${fol}/OUTCAR" ]]; then
+        obin=$(grep -m 1 0 "${fol}/O*CAR" 2> /dev/null | grep -c Binary 2> /dev/null )
+        if [[ ${obin} -eq 0 ]]; then
+            oszi=$(grep "F=" "${fol}/OSZICAR" -c 2> /dev/null)
+            if [[ ${oszi} -eq 1 ]]; then
+                out=$(grep reached "${fol}/OUTCAR" -c 2> /dev/null )
+                if [[ ${out} -eq 1 ]]; then
+                    finished=$(grep "Total CPU time used" "${fol}/OUTCAR" -c 2> /dev/null)
+                    if [[ ${finished} -eq 1 ]]; then
+                        crash=$(grep "BRMIX:" "${fol}/vasp_out" -c 2> /dev/null )
+                        if [[ ${crash} -eq 0 ]]; then
+                            running=$(find . -mmin -$waittime  -wholename "${fol}/OUTCAR" | grep "${fol}/OUTCAR" -c)
+                            if [[ ${running} -eq 0 ]]; then
+                                archive_command ${fol}
+                            fi
+                        fi
+                    fi
+                fi
+            fi
+        fi
+    fi
+done

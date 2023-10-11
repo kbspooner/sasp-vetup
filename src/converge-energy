@@ -1,0 +1,27 @@
+#!/bin/bash
+# v
+# 
+
+if [[ ${@} =~ '--help' ]] || [[ ${@} =~ '-h' ]]; then
+    echo "Write final energies and energy changes per atom to a file."
+    echo "Reads atom number from POSCAR."
+    echo "Usage: converge-energy output input1 intput2 ..."
+    echo ""
+    echo "    output: output file name"
+    echo "    input:  input files."
+    echo ""
+    exit 0
+
+natom=$(awk 'NR==7 {tot=0; for (n=1; n<=NF; n++) {tot+=$n}; print tot}' $2/POSCAR)
+
+echo '#dir E(eV) dE(eV/atom)' > $1
+e=$(grep y= $2/OUTCAR | tr -s ' ' | cut -d ' ' -f 8)
+echo "$2 $e" >> $1
+
+for i in ${@:3}; do
+    echo -n "$i " >> $1
+    e0=$e
+    e=$(grep y= $i/OUTCAR | tr -s ' ' | cut -d ' ' -f 8)
+    echo -n "$e " >> $1
+    awk -v e0=$e0 -v e=$e -v natom=$natom 'BEGIN {atom=(e-e0)/natom*1000; print atom}' >> $1
+done

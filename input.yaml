@@ -1,0 +1,21 @@
+# Defaults
+
+encut: 500
+nbands: 100
+natom: 20
+
+kpoints: [5,5,5]
+ibz: 36
+kpar: 6
+
+# Electronic
+
+e:
+    nbands: 120
+
+# KPOINTS
+
+k01:
+    kpoints: [1,1,1]
+    ibz: 1
+    kpar: 1

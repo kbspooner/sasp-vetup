@@ -1,0 +1,34 @@
+#!/usr/bin/bash
+
+if [[ ${@} =~ '--help' ]] || [[ ${@} =~ '-h' ]]; then
+    echo "Collates convergence data and calculates difference per atom."
+    echo ""
+    echo "Usage: reap-converge"
+    echo ""
+    exit 0
+fi
+
+cd encut
+e="#ENCUT E (eV) Ediff (meV/atom)\n"
+for f in */; do
+    e+="${f/%\/} "
+    ef=($(grep y= $f/OUTCAR))
+    e1=${ef[@]:6:1}
+    e+=${e1:-0}"\n"
+done
+echo -e $e > ../cone
+
+cd ../kpoint
+e="#KPOINTS E (eV) Ediff (meV/atom)\n"
+for f in */; do
+    e+="${f/%\/} "
+    ef=($(grep y= $f/OUTCAR))
+    e1=${ef[@]:6:1}
+    e+=${e1:-0}"\n"
+done
+echo -e $e > ../conk
+
+cd ..
+natom=$(head -n 7 kpoint/$f/POSCAR | tail -n 1 | awk '{sum=0; for(i=1;i<=NF;i++){sum+=$i}; print sum}')
+cdiff -a $natom
+cat con?

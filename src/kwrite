@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+
+import argparse
+
+parser = argparse.ArgumentParser(
+         description='Writes a KPOINTS file.')
+parser.add_argument('input', metavar='input', nargs='+',
+                    help='k values along a, b and c or settings file '
+                         'with optional sub-dictionary key')
+parser.add_argument('-f', '--factor', metavar='f', type=float, nargs=3,
+                    help='factor to divide the kpoints by (they will '
+                         'be rounded up). Useful for supercells')
+args = parser.parse_args()
+
+if len(args.input) == 3:
+    kgrid = args.input
+elif len(args.input) == 2:
+    from yaml import safe_load
+    with open(args.input[0]) as f:
+        kgrid = safe_load(f)[args.input[1]]['kpoints']
+elif len(args.input) == 1:
+    from yaml import safe_load
+    with open(args.input[0]) as f:
+        kgrid = safe_load(f)['kpoints']
+
+if args.factor is not None:
+    from numpy import ceil, divide
+    kgrid = [int(k) for k in ceil(divide(kgrid, args.factor))]
+
+kpoints = ['Automatic mesh',
+           '0',
+           'Gamma',
+           '{} {} {}'.format(kgrid[0], kgrid[1], kgrid[2]),
+           '0. 0. 0.']
+
+with open('KPOINTS', 'w') as f:
+    f.write('\n'.join(kpoints))

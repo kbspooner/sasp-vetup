@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+
+import argparse
+
+parser = argparse.ArgumentParser(
+         description='Calculates the difference from convergence files')
+parser.add_argument('-a', '--atoms', metavar='atoms', type=int,
+                    help='number of atoms (if you want per atom)')
+args = parser.parse_args()
+
+import numpy as np
+
+e = np.loadtxt('cone', dtype=str).tolist()
+k = np.loadtxt('conk', dtype=str).tolist()
+
+if args.atoms is not None:
+    factor = 1000/args.atoms
+    unit = "meV/atom"
+else:
+    factor = 1000
+    unit = "meV"
+
+e[0].append('#')
+for i in range(len(e)-1):
+    e[i+1].append((float(e[i+1][1]) - float(e[i][1])) * factor)
+np.savetxt('cone', e, fmt='%s', header='ENCUT E (eV) Ediff ({})'.format(unit))
+
+k[0].append('#')
+for i in range(len(k)-1):
+    k[i+1].append((float(k[i+1][1]) - float(k[i][1])) * factor)
+np.savetxt('conk', k, fmt='%s', header='KPOINTS E (eV) Ediff ({})'.format(unit))

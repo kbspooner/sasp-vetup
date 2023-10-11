@@ -1,0 +1,65 @@
+#!/usr/bin/bash
+
+declare -a quants=('elast' 'diel' 'sdiel' 'piezo')
+
+if [[ ${@} =~ '--help' ]] || [[ ${@} =~ '-h' ]]; then
+    echo "Checks convergence"
+    echo "Usage: converge quantities..."
+    echo ""
+    echo "    quantities: quantities to converge. Options: ${quants[@]}"
+    echo ""
+    exit 0
+fi
+
+## Elasic constant
+
+elast() {
+    elastic="# Elastic constant (kbar)\n"
+    for f in ${@:-*/}/; do
+        elastic+="$f "
+        temp=($(grep "TOTAL ELASTIC" $f/OUTCAR -A 5 | tail -n 3))
+        elastic+=${temp[@]:1:1}" "${temp[@]:9:1}" "${temp[@]:17:1}"\n"
+    done
+    echo -e $elastic | tee elast.dat
+}
+
+## High-frequency dielectric constant
+
+diel() {
+    die="# High-frequency dielectric constant (epsilon0)\n"
+    for f in ${@:-*/}/; do
+        die+="$f "
+        temp=($(grep "REAL DIEL" $f/OUTCAR -A 3 -m 1 | tail -n 1))
+        die+=${temp[@]:1:3}"\n"
+    done
+    echo -e $die | tee diel.dat
+}
+
+## Static dielectric constant
+
+sdiel() {
+    sdie="# Static dielectric constant (epsilon0)\n"
+    for f in ${@:-*/}/; do
+        sdie+="$f "
+        temp=($(grep "CONTRIBUTION$" $f/OUTCAR -A 4 | tail -n 3))
+        sdie+=${temp[@]:0:1}" "${temp[@]:4:1}" "${temp[@]:8:1}"\n"
+    done
+    echo -e $sdie | tee sdiel.dat
+}
+
+## Piezoelectric coefficient
+
+piezo() {
+    piez="# Piezoelectric coefficient (C/m^2)\n"
+    for f in ${@:-*/}/; do
+        piez+="$f "
+        temp=($(grep "PIEZOELECTRIC TENSOR IONIC CONTR" $f/OUTCAR -m 1 -A 5 | tail -n 3))
+        piez+=${temp[@]:1:1}" "${temp[@]:9:1}" "${temp[@]:17:1}"\n"
+    done
+    echo -e $piez | tee piezo.dat
+}
+
+if [[ ${@} =~ 'elast' ]]; then elast(); fi
+if [[ ${@} =~ 'diel' ]]; then diel(); fi
+if [[ ${@} =~ 'sdiel' ]]; then sdiel(); fi
+if [[ ${@} =~ 'piezo' ]]; then piezo(); fi

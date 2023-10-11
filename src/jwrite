@@ -1,0 +1,409 @@
+#!/usr/bin/env python
+# You may want to edit this script with your own defaults (from
+# line 78), which can be set with "export computer=computer_name" (e.g.
+# in your ~/.bashrc).
+
+# Inputs
+
+import argparse
+
+parser = argparse.ArgumentParser(
+         description='Writes a VASP job submission script. '
+                     'Automatically generates an array job if '
+                     'multiple subdirectories are present. "export '
+                     'computer=computer_name" to get custom fields')
+parser.add_argument('name', metavar='name', help='name of the job')
+parser.add_argument('-b', '--budget', metavar='budget',
+                    help='budget to use')
+parser.add_argument('-c', '--cores',  metavar='ncores', type=int,
+                    help='number of cores, general default: 48')
+parser.add_argument('--computer', metavar='computer',
+                    help='computer to run calculation on. Overrides '
+                         'defaults, which can be set with "export '
+                         'computer=computer_name"')
+parser.add_argument('-d', '--depth', metavar='depth', type=int,
+                    default=1,
+                    help='depth of directories run, default: 1 if '
+                         'directories present else 0')
+parser.add_argument('-f', '--filename', metavar='filename',
+                    default='job',
+                    help='output filename, default: job')
+parser.add_argument('-g', '--gamma', action='store_true',
+                    help='specifies gamma point only calculation')
+parser.add_argument('--grid_engine', metavar='grid engine',
+                    help='grid engine used, expands pbs and sge, '
+                         'general default: sge')
+parser.add_argument('-l', '--log', metavar='log file',
+                    help='log file')
+parser.add_argument('-m', '--memory', metavar='memory', type=float,
+                    default=4,
+                    help='amount of memory in GB, default: 4')
+parser.add_argument('-n', '--node', metavar='node type',
+                    help='node type')
+parser.add_argument('-o', '--out', metavar='output file',
+                    help='output file')
+parser.add_argument('-q', '--queue', metavar='queue', default='Free',
+                    help='queue to use, default: Free (if applicable)')
+parser.add_argument('--ererun', action='store_true',
+                    help='reruns successfully STOPCARed calculations')
+parser.add_argument('--grerun', action='store_true',
+                    help='reruns unconverged geometry relaxations')
+parser.add_argument('-s', '--soc', action='store_true',
+                    help='specifies spin-orbit coupling calculation')
+parser.add_argument('-t', '--time', metavar='walltime', type=float,
+                    help='walltime in hours, general default: 24')
+parser.add_argument('--tasks', metavar='tasks', type=int, nargs='+',
+                    help='tasks to run. Accepts either a single task '
+                         'number, a minimum and maximum or minimum, '
+                         'maximum and step size, default: total number '
+                         'of directories listed using the depth, '
+                         'prefix and suffix commands')
+parser.add_argument('--threads', metavar='threads', type=int, default=1,
+                    help='number of threads per core, default: 1')
+parser.add_argument('-v', '--vasp', metavar='vasp load command',
+                    help='command to load vasp, expands e.g 5.4.1, '
+                         'default: 5.4.4')
+parser.add_argument('--prefix', metavar='prefix', nargs='+',
+                    help='directory prefixes to include')
+parser.add_argument('--suffix', metavar='suffix', nargs='+',
+                    help='directory suffixes to include')
+parser.add_argument('--xprefix', metavar='prefix', nargs='+',
+                    help='directory prefixes to exclude')
+parser.add_argument('--xsuffix', metavar='suffix', nargs='+',
+                    help='directory suffixes to exclude')
+args = parser.parse_args()
+
+import glob
+import os
+from itertools import chain
+
+# Defaults
+
+bulk = 'e05-bulk-dos'
+power = 'e05-power-dos'
+
+pv = 'scanlodo-quantum-pv'
+
+faraday = 'Faraday_MSM_dos'
+scanlon = 'UCL_chemM_Scanlon'
+
+pbs = 'PBS_ARRAY_INDEX'
+sge = 'SGE_TASK_ID'
+
+archer544 = ['module add vasp5/5.4.4-intel16']
+
+bhamvasp = ['module purge',
+            'module load bluebear']
+bham632 = [*bhamvasp,
+           'module load bear-apps/2022a',
+           'module load VASP/6.3.2-intel-2022a']
+bhamgpu = [*bhamvasp,
+           'module load bear-apps/2022a',
+           'module load VASP/6.3.2-nvofbf-2022.07']
+
+uclvasp = ['module purge',
+           'module load gcc-libs',
+           'module load gerun']
+ucl541 = [*uclvasp,
+           'module load compilers/intel/2015/update2',
+           'module load mpi/intel/2015/update3/intel',
+           'module load vasp/5.4.1-05feb16-p2/intel-2015-update2']
+ucl544 = [*uclvasp,
+           'module load compilers/intel/2017/update1',
+           'module load mpi/intel/2017/update1/intel',
+           'module load vasp/5.4.4-18apr2017/intel-2017-update1']
+ucl612 = [*uclvasp,
+           'module load compilers/intel/2019/update5',
+           'module load mpi/intel/2019/update5/intel',
+           'module load vasp/6.1.2-01dec2020/intel-2019-update5']
+ucl621 = [*uclvasp,
+           'module load compilers/intel/2019/update5',
+           'module load mpi/intel/2019/update5/intel',
+           'module load vasp/6.2.1-19Jan2022/intel-2019-update5']
+ucl630 = [*uclvasp,
+           'module load compilers/intel/2019/update5',
+           'module load mpi/intel/2019/update5/intel',
+           'module load vasp/6.3.0-24Jan2022/intel-2019-update5']
+
+if args.soc:
+    build = 'ncl'
+elif args.gamma:
+    build = 'gam'
+else:
+    build = 'std'
+
+default = {'budget': {'archer':   power,
+                      'bluebear': pv,
+                      'pv':       pv,
+                      'bulk':     bulk,
+                      'power':    power,
+                      'michael':  faraday,
+                      'young':    scanlon,
+                      'faraday':  faraday,
+                      'scanlon':  scanlon,
+                      'default':  None},
+
+           'cores':  {'archer':    32,
+                      'bluebear':  12,
+                      'kathleen':  80,
+                      'michael':   48,
+                      'michael-A': 40,
+                      'michael-K': 48,
+                      'myriad':    12,
+                      'young':     40,
+                      'default':   48},
+
+           'log':    {'default':  '~/job.log'},
+
+           'out':    {'default':  'vasp-out-{}-${{JOB_ID}}'.format(args.name)}, # updated on line 266
+
+           'task':   {'archer':   pbs,
+                      'bluebear': pbs,
+                      'kathleen': sge,
+                      'michael':  sge,
+                      'myriad':   sge,
+                      'young':    sge,
+                      'pbs':      pbs,
+                      'sge':      sge,
+                      'default':  sge},
+
+           'time':   {'archer':   24,
+                      'bluebear': 24,
+                      'kathleen': 12,
+                      'michael':  48,
+                      'myriad':   12,
+                      'young':    48,
+                      'default':  24},
+
+           'vasp':   {'archer':   archer544,
+                      'bluebear': bham632,
+                      'kathleen': ucl630,
+                      'michael':  ucl630,
+                      'myriad':   ucl630,
+                      'young':    ucl630,
+                      '5.4.1':    ucl541,
+                      '5.4.4':    ucl544,
+                      '6.1.2':    ucl612,
+                      '6.2.1':    ucl621,
+                      '6.3.0':    ucl630,
+                      '6.3.2':    bham632,
+                      'default':  bham632}}
+
+if args.computer is None:
+    try:
+        computer = os.environ['computer'].lower()
+    except Exception:
+        pass
+else:
+    computer = args.computer
+
+def get(input, name, computer=computer, default=default):
+    """Gets a value for a property.
+
+    From (in order of precedence) the command line, computer default or
+    general default (defined from line 78).
+
+    Args:
+        input (:obj:'str'): command line input.
+        name (:obj:'str'): name of property (in settings and default).
+        computer ('obj:'str'): name of computer.
+        default (:obj:'dict'): default values.
+
+    Returns:
+        :obj:'str': value.
+    """
+
+    if input is None:
+        try:
+            output = default[name][computer]
+        except Exception:
+            output = default[name]['default']
+    else:
+        output = input
+
+    return output
+
+budget = get(args.budget, 'budget')
+cores = get(args.cores, 'cores')
+task = get(args.grid_engine, 'task')
+time = get(args.time, 'time')
+vasp = get(args.vasp, 'vasp')
+
+## Arrays
+
+if args.depth > 0:
+    dirs = []
+    for level in range(args.depth):
+        dirs.append('*')
+
+    dirs = [dir for dir in glob.glob('/'.join(dirs)) if os.path.isdir(dir)]
+
+    if args.xprefix is not None:
+        for prefix in args.xprefix:
+            dirs = [dir for dir in dirs if not dir.startswith(prefix)]
+    if args.xsuffix is not None:
+        for suffix in args.xsuffix:
+            dirs = [dir for dir in dirs if not dir.endswith(suffix)]
+
+    dir2 = None
+    if args.prefix is not None:
+        dir2 = []
+        for prefix in args.prefix:
+            dir2.append([dir for dir in dirs if dir.startswith(prefix)])
+    if args.suffix is not None:
+        if dir2 is None:
+            dir2 = []
+        for suffix in args.suffix:
+            dir2.append([dir for dir in dirs if dir.endswith(suffix)])
+    if dir2 is not None:
+      dirs = dir2
+      dirs = list(chain(*dirs))
+
+    if len(dirs) == 0:
+        arrs = False
+    else:
+        arrs = True
+        default['out'] = {'default': 'vasp-out-{}-${{JOB_ID}}-${{SGE_TASK_ID}}'.format(args.name)}
+        dirs = sorted(dirs)
+        if args.tasks is not None:
+            if len(args.tasks) == 3:
+                tasks = '{}-{}:{}'.format(args.tasks[0], args.tasks[1],
+                                                         args.tasks[2])
+            elif len(args.tasks) == 2:
+                tasks = '{}-{}'.format(args.tasks[0], args.tasks[1])
+            elif len(args.tasks) == 1:
+                tasks = '{}'.format(args.tasks[0])
+            else:
+                raise Exception('A maximum of three arguments was expected for'
+                                ' --tasks.')
+        else:
+            tasks = '1-{}'.format(len(dirs))
+else:
+    arrs = False
+
+## Time
+
+hours = int(time - (time % 1))
+minutes = (time % 1) * 60
+mins  = int(minutes - (minutes % 1))
+seconds = (minutes % 1) * 60
+secs = int(seconds - (seconds % 1))
+
+# Job File
+
+if args.computer == 'archer':
+    settings = ['#!/bin/bash --login',
+                '#PBS -N {}'.format(args.name),
+                '#PBS -l select={}'.format(cores),
+                '#PBS -l walltime={h}:{m:0>2}:{s:0>2}'.format(
+                                                      h=hours, m=mins, s=secs),
+                '#PBS -A {}'.format(budget)]
+
+    if arrs:
+        settings.extend(['#PBS -J {}'.format(tasks),
+                         '#PBS -r y'])
+
+    settings.extend(['',
+                     'export PBS_O_WORKDIR=$(readlink -f $PBS_O_WORKDIR)',
+                     'cd $PBS_O_WORKDIR',
+                     'export NPROC=`qstat -f $PBS_JOBID | awk \'/Resource_List.ncpus/ {print $3}\'`',
+                     'export OMP_NUM_THREADS={}'.format(args.threads)])
+else:
+    settings = ['#!/bin/bash -l',
+                '#$ -S /bin/bash',
+                '#$ -l h_rt={h}:{m:0>2}:{s:0>2}'.format(
+                                                      h=hours, m=mins, s=secs),
+                '#$ -l mem={}G'.format(args.memory),
+                '#$ -N {}'.format(args.name),
+                '#$ -pe qlc {}'.format(cores),
+                '#$ -cwd',
+                '#$ -o q.output',
+                '#$ -e q.error']
+
+    if args.node is not None:
+        settings.extend(['#$ -ac allow={}'.format(args.node)])
+
+    if arrs:
+        settings.extend(['#$ -t {}'.format(tasks)])
+    if budget is not None:
+        settings.extend(['#$ -P {}'.format(args.queue),
+                         '#$ -A {}'.format(budget)])
+
+    if args.threads != 1:
+        settings.extend(['#$ -l threads=1',
+                         '',
+                         'export OMP_NUM_THREADS={}'.format(args.threads)])
+
+    settings.extend(['',
+                     'ulimit -s unlimited',
+                     'ulimit -m unlimited'])
+
+if vasp is not None:
+    settings.extend([''])
+    settings.extend(vasp)
+
+settings.extend(['\n'])
+
+# Construction
+
+## Header
+
+with open(args.filename, 'w') as file:
+    file.write('\n'.join(settings))
+
+    if arrs and (args.ererun or args.grerun):
+        file.write('cwd=$(pwd)\n\n')
+
+
+## Arrays
+
+    logpath = get(args.log, 'log')
+    outpath = get(args.out, 'out')
+
+    if arrs:
+        jobtask = '${{JOB_ID}} ({}) task ${{SGE_TASK_ID}}'.format(args.name)
+        file.write('file=(dummy ')
+        file.write(' '.join(dirs))
+        file.write(')\n\ncd ${{file[${}]}} || exit\n'.format(task))
+    else:
+        jobtask = '${{JOB_ID}} ({})'.format(args.name)
+
+    file.write('date >> {}\n'.format(logpath))
+    file.write('echo "starting {}" >> {}\n'.format(jobtask, logpath))
+    file.write('echo "due $(date -d \'+{} hours {} minutes {} seconds\')" >> {}\n\n'.format(
+                                       hours,   mins,      secs, logpath))
+
+## Running
+
+    if args.computer == 'archer':
+        file.write('aprun -n ${{NPROC}} vasp_{} > vasp_out\n\n'.format(build))
+    else:
+        file.write('gerun vasp_{} > vasp_out\n\n'.format(build))
+
+    file.write('date >> {}\n'.format(logpath))
+    file.write('echo "ending {}" >> {}\n'.format(jobtask, logpath))
+    file.write('tail -n 1 OUTCAR >> {}'.format(logpath))
+
+## Rerunning
+
+    rerun = []
+    if args.ererun:
+        rerun.extend(['\n\nif [[ $(grep -c "hard stop" OUTCAR) -eq 1 ]]; then',
+                      '    echo "resubmitting STOPCARed calculation" >> {}'.format(logpath),
+                      '    echo "resubmitting STOPCARed calculation" >> {}'.format(outpath),
+                      '    cp OUTCAR OUTCAR-${JOB_ID}'])
+    elif args.grerun:
+        rerun.extend(['\n\nif [[ $(grep -c "reached required" OUTCAR) -eq 0 ]]; then',
+                      '    echo "resubmitting unconverged relaxation" >> {}'.format(logpath),
+                      '    echo "resubmitting unconverged relaxation" >> {}'.format(outpath),
+                      '    cp CONTCAR POSCAR',
+                      '    cp OUTCAR OUTCAR-${JOB_ID}'])
+    if rerun != []:
+        if arrs:
+            rerun.extend(['    cd $cwd',
+                          '    qsub -t ${SGE_TASK_ID} job',
+                          'fi'])
+        else:
+            rerun.extend(['    qsub job',
+                          'fi'])
+        file.write('\n'.join(rerun))

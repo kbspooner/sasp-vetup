@@ -1,0 +1,70 @@
+#!/usr/bin/bash
+
+calc_encut=true
+calc_kpoints=true
+submit=false
+
+system='default'
+functional='pbesol'
+pots='pbe'
+calc='conv'
+
+declare -a encut=({200..700..50})
+declare -a kpoint=(k{01..10})
+defe=500
+defk='k10'
+settings='input.yaml'
+
+cores=80
+walltime=0.5
+
+cwd=$(pwd)
+potpunch ${pots}
+
+for dir in converge converge/encut converge/kpoint; do
+  if [ ! -d $dir ]; then
+    mkdir $dir
+  fi
+done
+
+skip=()
+cd converge/encut
+if ${calc_encut}; then
+    for e in ${encut[@]}; do
+        if [ ! -d e$e ]; then
+            mkdir e$e
+            cd e$e
+            inpunch ${functional} ${calc} -e $e
+            kwrite ${cwd}/${settings} ${defk}
+            cp ../../../PO?CAR .
+            cd ..
+        else
+            echo "e$e exists, skipping"
+            skip+=(e$e)
+        fi
+    done
+fi
+
+cd ../kpoint
+if ${calc_kpoints}; then
+    for k in ${kpoint[@]}; do
+        if [ ! -d $k ]; then
+            mkdir $k
+            cd $k
+            inpunch ${functional} ${calc} -e ${defe}
+            kwrite ${cwd}/${settings} $k
+            cp ../../../PO?CAR .
+            cd ..
+        else
+            echo "$k exists, skipping"
+            skip+=($k)
+        fi
+    done
+fi
+
+cd ..
+jwrite ${system}${calc} -c ${cores} -t ${walltime} -d 2 --xsuffix ${skip[@]}
+
+if ${submit}; then
+    qsub job
+fi

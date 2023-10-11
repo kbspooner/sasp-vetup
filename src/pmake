@@ -1,0 +1,26 @@
+#!/usr/bin/bash
+
+if [[ ${@} =~ '--help' ]] || [[ ${@} =~ '-h' ]]; then
+    echo "Sets up phonon calculations"
+    echo "Usage: pmake sx sy sz func settings subdicts..."
+    echo ""
+    echo "    sx, sy, sz: supercell dimensions"
+    echo "    func:       functional (hse, ps...)"
+    echo "    settings:   input.yaml"
+    echo "    subdicts:   input.yaml subdictionaries"
+    echo ""
+    exit 0
+fi
+
+potpunch pbe
+
+phonopy -d --dim="$1 $2 $3"
+
+for poscar in POSCAR-*; do
+    n=${poscar#POSCAR-}
+    mkdir disp-$n
+    mv $poscar disp-$n/POSCAR
+    kwrite ${@:5} -f $1 $2 $3
+    inpunch $4 phon -y ${@:5} --kpar 1 -f $1 $2 $3
+    cp INCAR KPOINTS POTCAR disp-$n || (echo "missing input files!" && break)
+done

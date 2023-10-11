@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+
+if [[ ${@} =~ '--help' ]] || [[ ${@} =~ '-h' ]]; then
+    echo "Search the periodic table"
+    echo "Usage: ptgrep elements..."
+    echo ""
+    echo "    elements: elements to find"
+    echo ""
+    exit 0
+fi
+
+if [[ -n ${@} ]]; then
+    es=''
+    for e in ${@}; do
+        es+="\|$e |"
+        es+="\| $e |"
+    done
+    cat ${HOME}/src/sasp-vetup/pt | grep -E "${es%|}" -A 22 -B 22 --color
+else
+    cat ${HOME}/src/sasp-vetup/pt
+fi

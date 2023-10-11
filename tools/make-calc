@@ -1,0 +1,73 @@
+#!/usr/bin/bash
+
+# Setup
+
+## Calculation Parameters
+
+system='default'
+functional='hse'
+pots='pbe'
+overrides=''
+calc='opt'
+
+## Files
+
+declare -a names=('k06' 'k08' 'k10' 'k12' 'k14' 'k16')
+poscar='POSCAR'
+settings='input.yaml'
+jobfile=''
+
+## Job Parameters
+
+cores=144
+node='K'
+queue='Gold'
+walltime=24
+
+submit=true; subcom='qsub'
+
+
+# Script
+
+cwd=$(pwd)
+computer=$(echo "${computer}" | awk '{print tolower($0)}')
+declare -a budgets=('archer' 'bluebear' 'michael' 'young')
+declare -a nodes=('bluebear' 'michael')
+declare -a elec=('band' 'dos' 'opt')
+if [[ ${elec[@]} =~ ${calc} ]]; then
+    e='e'
+else:
+    e=''
+fi
+
+if [[ ! -d ${calc} ]]; then
+    mkdir ${calc} || break
+fi
+
+cp ${poscar} ${calc}/
+cd ${calc}/
+
+potpunch ${pots} ${overrides}
+
+skip=()
+for n in ${names[@]}; do
+    mkdir ${n} 2> /dev/null || (echo skipped ${n} && skip+=(${n}) && continue)
+    cp PO?CAR ${n}
+    cd ${n}
+    inpunch ${functional} ${calc} -y ${cwd}/${settings} ${n} ${e}
+    kwrite ${cwd}/${settings} ${n}
+    cd ../
+done
+
+jcom="jwrite ${system}${calc} --prefix k"
+if [[ -n ${cores} ]]; then jcom+=" -c ${cores}"; fi
+if [[ -n ${walltime} ]]; then jcom+=" -t ${walltime}"; fi
+if [[ ${budgets[@]} =~ ${computer} ]] && [[ -n ${queue} ]]; then jcom+=" -q ${queue}"; fi
+if [[ ${nodes[@]} =~ ${computer} ]] && [[ -n ${node} ]]; then jcom+=" -n ${node}"; fi
+if [[ -n ${skip} ]]; then jcom+=" --xsuffix ${skip[@]}"; fi
+if [[ -n ${jobfile} ]]; then jcom+=" -o ${jobfile}"; fi
+
+${jcom}
+if ${submit}; then
+    ${subcom} ${jobfile:-'job'}
+fi

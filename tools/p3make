@@ -1,0 +1,29 @@
+#!/bin/bash
+
+dim_fc2="3 3 4"
+dim_fc3="1 1 2"
+amplitude="0.03"
+
+phono3py_path="phono3py"
+fc2_input="input_fc2"
+fc3_input="input_fc3"
+poscar="POSCAR"
+potcar="POTCAR"
+
+${phono3py_path} -d --dim "${dim_fc3}" --dim_fc2 "${dim_fc2}" -c ${POSCAR} --amplitude ${amplitude}
+
+mkdir fc3  || (echo "fc3 already exists!" && break)
+for poscar in POSCAR-*; do
+    id=${poscar#POSCAR-}
+    mkdir fc3/disp-${id}
+    mv ${poscar} fc3/disp-${id}/POSCAR
+    cp ${fc3_input}/{INCAR,KPOINTS} ${potcar} fc3/disp-${id} || (echo "missing input files!" && break)
+done
+
+mkdir fc2  || (echo "fc2 already exists!" && break)
+for poscar in POSCAR_FC2-*; do
+    id=${poscar#POSCAR_FC2-}
+    mkdir fc2/disp-${id}
+    mv ${poscar} fc2/disp-${id}/POSCAR
+    cp ${potcar} ${fc2_input}/{INCAR,KPOINTS} fc2/disp-${id} || (echo "missing input files!" && break)
+done

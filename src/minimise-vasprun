@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""
+Command line script to minimising vasprun.xml files. for phono(3)py.
+Usage: minimise-vasprun vasprun.xml
+Dependencies: python > 3.6, click
+"""
+import os
+import shutil
+import click
+
+@click.command('trim-vasprun')
+@click.argument('input-file', type=click.Path(exists=True))
+
+def trim_tags(input_file):
+    """
+    Reduce the size of vasprun.xml file by to that necessary for phono3py.
+    This tool may DESTROY your data, use with caution!
+    """
+    trimmed = False
+    with open(input_file) as fhi:
+        tmpfile = input_file + '.tmp'
+        if os.path.isfile(tmpfile):
+            click.echo(f'Temp file {tmpfile} already exists - please remove it to continue')
+            return
+        with open(input_file + '.tmp', 'w') as fho:
+            keep = True
+            for line in fhi:
+                if '</generator>' in line:
+                    keep = False
+                    trimmed = True
+                    fho.write(line)
+                    fho.write(' <calculation>\n')
+                    continue
+                if '<varray name="forces" >' in line:
+                    keep = True
+                if keep:
+                    fho.write(line)
+                    if '</varray>' in line:
+                        keep = False
+                        fho.write(' </calculation>\n')
+                        fho.write('</modeling>')
+                        break
+    if trimmed:
+        if not keep:
+            click.echo(f'minimised')
+            shutil.move(input_file + '.tmp', input_file)
+        else:
+            click.echo(f"Did not find the end of a tag - aborting")
+            os.remove(input_file + '.tmp')
+    else:
+        click.echo(f"Tags not found")
+        os.remove(input_file + '.tmp')
+    return
+
+if __name__ == '__main__':
+    trim_tags()

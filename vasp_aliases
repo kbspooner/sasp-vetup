@@ -1,0 +1,158 @@
+# .vasp_aliases
+
+
+## INCAR
+
+encut() { # gets encut
+    for f in ${@:-'.'}/; do
+        echo $f
+        grep ENCUT $f/INCAR
+    done
+}
+
+func() { # gets functional information
+    for f in ${@:-'.'}/; do
+        echo $f
+        grep -e "GGA " -e LHFCALC -e HFSCREEN -e AEXX $f/INCAR
+    done
+}
+
+soc() { # gets soc status
+    for f in ${@:-'.'}/; do
+        echo $f
+        grep LSORBIT $f/INCAR
+        grep vasp_ $f/job
+    done
+}
+
+## OUTCAR
+
+be() { # gets the band edge at a kpoint
+    grep "k-point  [ ]*${1:-1} :    " OUTCAR
+    grep "k-point  [ ]*${1:-1} :    " OUTCAR -A ${2:-10000} | grep 0\.00000 -m 1 -B ${3:-5}
+}
+
+core() { # gets the core state eigenenergies
+    for f in ${@:-'.'}/; do 
+      echo $f
+      grep "core state" $f/OUTCAR -A 1
+    done
+}
+
+e() { # gets ionic step energies
+    for f in ${@:-'.'}/; do
+        echo $f
+        grep y= $f/OUTCAR
+    done
+}
+
+ea() { # gets ionic step energies
+    for f in ${@:-'.'}/; do
+        echo $f
+        grep y= $f/OUTCAR*
+    done
+}
+
+econ() { # gets electronic convergence and time information
+    for f in ${@:-'.'}/; do
+        echo $f
+        grep -e LOOP: -e y= $f/OUTCAR
+    done
+}
+
+ef() { # gets ionic step energies
+    for f in ${@:-'.'}/; do
+        echo -n "$f:     "
+        grep y= $f/OUTCAR | tail -n 1
+    done
+}
+
+elapsed() { # gets human-readable time information
+    for f in ${@:-'.'}/; do
+        echo -n "$f:     "
+        grep Elapsed $f/OUTCAR | awk '{h = $4 / 3600; print $4 " s or " h " hours"}'
+    done
+}
+
+fdprog() { # gets finite-differences progress
+    for f in ${@:-'.'}/; do
+        echo "$f:     "
+        grep "Finite diff" $f/OUTCAR -A 3 | tail -n 4
+    done
+}
+
+iter() { # gets iteration number
+    for f in ${@:-'.'}; do
+        echo -n "$f:     "
+        grep Iteration $f/OUTCAR | tail -n 1
+        echo " "
+    done
+}
+
+iloop() { # gets ionic loop times
+    for f in ${@:-'.'}/; do
+        echo $f
+        grep LOOP+ $f/OUTCAR
+    done
+}
+
+loop() { # gets loop times
+    for f in ${@:-'.'}/; do
+        echo $f
+        grep LOOP $f/OUTCAR
+    done
+}
+
+nelect() { # gets number of electrons
+    for f in ${@:-'.'}/; do
+        echo -n "$f:     "
+        grep NELECT $f/OUTCAR
+        echo " "
+    done
+}
+
+verged() { # checks ionic convergence
+    for f in ${@:-'.'}/; do
+        echo -n "$f:     "
+        grep 'reached required' $f/OUTCAR
+        echo " "
+    done
+}
+
+## Other
+
+ibz() { # gets number of IBZ kpoints for KPAR
+    for f in ${@:-'IBZKPT'}; do
+        echo -n "$f:     "
+        factor $(head -n 2 ${f} | tail -n 1)
+    done
+}
+
+kmesh() { # gets kmesh
+    for f in ${@:-'.'}; do
+        echo -n "$f:     "
+        echo $(head -n 4 $f/KPOINTS | tail -n 1)
+    done
+}
+
+nk() { # gets number of kpoints
+    for f in ${@:-'.'}; do
+        echo -n "$f:     "
+        echo $(head -n 2 $f/KPOINTS | tail -n 1)
+    done
+}
+
+natom() { # gets number of atoms
+    for f in ${@:-'.'}; do
+        echo -n "$f:     "
+        cat $f/POSCAR | awk 'FNR == 7 {tot=0; for (n=1; n<=NF; n++) {tot += $n}; print tot}'
+    done
+}
+
+pot() { # gets atoms from POSCAR and POTCAR
+    for f in ${@:-'.'}/; do
+        echo $f
+        head -n 6 $f/POSCAR | tail -n 1
+        grep TITEL $f/POTCAR
+    done
+}

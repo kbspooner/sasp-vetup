@@ -1,0 +1,117 @@
+#!/bin/bash -l
+#$ -S /bin/bash
+#$ -l h_rt=48:00:00
+#$ -l mem=4G
+#$ -N phono3py
+#$ -pe qlc 80
+#$ -cwd
+#$ -o q.output
+#$ -e q.error
+#$ -t 1-1000
+
+ulimit -s unlimited
+ulimit -m unlimited
+
+module unload compilers mpi
+module load compilers/intel/2017/update1
+module load mpi/intel/2017/update1/intel
+module load vasp/5.4.4-18apr2017/intel-2017-update1
+
+wd=$(pwd)
+waittime=3 # ~longest step in calculation (minutes)
+findir="fin"
+
+# I am a job script designed to efficiently run phonon calculations.
+# I run VASP in all the directories in the cwd, except findir.
+# I check the calculations ran correctly, and if they did I cull the useless
+# files, except the POSCAR and vasprun.xml, the latter of which I disembowel,
+# so only the vital parts remain.
+# I then lock up the POSCAR along with the eviscerated vasprun in findir.
+# If the calculation failed to run correctly, I rerun it.
+# Once every folder is in findir, I kill myself.
+#
+# Note: An ancillary script, jobflush, exists which can be run at the command
+# line to minimise menial file-processing on the compute nodes. You may want to
+# check my progress near the end, in case I'm spinning my wheels on some broken
+# directory or somesuch.
+
+run_command() {
+    cd $1 || continue
+    date >> ${wd}/job.log
+    echo "job ${JOB_ID} task ${SGE_TASK_ID} running: $1" >> ${wd}/job.log
+    gerun vasp_std > vasp_out
+    cd - || break 2
+}
+
+archive_command() {
+    cd $1 || continue
+    rm CHG* CONTCAR DOSCAR EIGENVAL IBZKPT INCAR KPOINTS OSZICAR PCDAT POTCAR REPORT WAVECAR XDATCAR
+    minimise-vasprun vasprun.xml >> vasp_out
+    cd - || break 2
+    mv ${fol} ${findir}
+    echo $1 archived! >> ${wd}/job.log
+}
+
+finish_command() {
+    echo fin >> ${wd}/job.log
+    qdel ${JOB_ID}
+    break
+}
+
+if [[ ! -d $findir ]]; then
+    mkdir $findir
+fi
+
+while true; do
+    fols=($(find -maxdepth 1 -type d -not -name $findir -not -name .))
+
+    if [[ ${#fols[@]} -eq 0 ]]; then
+        finish_command
+    fi
+
+    fols=($(shuf -e "${fols[@]}"))
+
+    for fol in "${fols[@]}"; do
+        if [[ ! -f "${fol}/OUTCAR" ]]; then
+            run_command ${fol}
+        else
+            running=$(find . -mmin -$waittime  -wholename "${fol}/OUTCAR" | grep "${fol}/OUTCAR" -c)
+
+            if [[ ${running} -ne 0 ]]; then
+                continue
+            else
+                obin=$(grep -m 1 0 "${fol}/O*CAR" 2> /dev/null | grep -c Binary 2> /dev/null )
+
+                if [[ ${obin} -ne 0 ]]; then
+                    run_command ${fol}
+                else
+                    oszi=$(grep " F= " "${fol}/OSZICAR" -c 2> /dev/null)
+
+                    if [[ ${oszi} -ne 1 ]]; then
+                        run_command ${fol}
+                    else
+                        out=$(grep reached "${fol}/OUTCAR" -c 2> /dev/null )
+
+                        if [[ ${out} -ne 1 ]]; then
+                            run_command ${fol}
+                        else
+                            finished=$(grep "Total CPU time used" "${fol}/OUTCAR" -c 2> /dev/null)
+
+                            if [[ ${finished} -ne 1 ]]; then
+                                run_command ${fol}
+                            else
+                                crash=$(grep "BRMIX:" "${fol}/vasp_out" -c 2> /dev/null )
+
+                                if [[ ${crash} -ne 0 ]]; then
+                                    run_command ${fol}
+                                else
+                                    archive_command ${fol}
+                                fi
+                            fi
+                        fi
+                    fi
+                fi
+            fi
+        fi
+    done
+done

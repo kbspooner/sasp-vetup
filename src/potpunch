@@ -1,0 +1,70 @@
+#!/usr/bin/bash
+
+# Writes a POTCAR from a POSCAR, using reccommended PAW potentials:
+# https://cms.mpi.univie.ac.at/vasp/vasp/Recommended_PAW_potentials_DFT_calculations_using_vasp_5_2.html
+# Requires the potentials to be in the variable $VASP_POTENTIALS.
+# Currently runs up to Cm (Curium, Z=96).
+
+declare -A pawdir=(['vasp']="$VASP_POTENTIALS"
+                   ['pbe']="$PBE_POTENTIALS"
+                   ['lda']="$LDA_POTENTIALS")
+
+if [[ ${@} =~ '--help' ]] || [[ ${@} =~ '-h' ]]; then
+    echo "Writes a POTCAR from a POSCAR using recommended potentials"
+    echo "Usage: potpunch pottype atom pot atom pot ..."
+    echo ""
+    echo "    pottype: potential (defined in this script). Options: ${!pawdir[@]}"
+    echo "    atom:    atom to override recommended potential for."
+    echo "    pot:     alternate potential choice for corresponding atom."
+    echo ""
+    exit 0
+fi
+
+# Periodic table of preferred POTCARs
+
+declare -A potcars=(
+['H']='H'                                                                                                                                                                                     ['He']='He'
+['Li']='Li_sv' ['Be']='Be'                                                                                              ['B']='B'     ['C']='C'     ['N']='N'     ['O']='O'     ['F']='F'     ['Ne']='Ne'
+['Na']='Na_pv' ['Mg']='Mg'                                                                                              ['Al']='Al'   ['Si']='Si'   ['P']='P'     ['S']='S'     ['Cl']='Cl'   ['Ar']='Ar'
+['K']='K_sv'   ['Ca']='Ca_sv'                                                                                           ['Ga']='Ga_d' ['Ge']='Ge_d' ['As']='As'   ['Se']='Se'   ['Br']='Br'   ['Kr']='Kr'
+['Rb']='Rb_sv' ['Sr']='Sr_sv'                                                                                           ['In']='In_d' ['Sn']='Sn_d' ['Sb']='Sb'   ['Te']='Te'   ['I']='I'     ['Xe']='Xe'
+['Cs']='Cs_sv' ['Ba']='Ba_sv'                                                                                           ['Tl']='Tl_d' ['Pb']='Pb_d' ['Bi']='Bi_d' ['Po']='Po_d' ['At']='At_d' ['Rn']='Rn'
+['Fr']='Fr_sv' ['Ra']='Ra_sv'
+
+               ['Sc']='Sc_sv' ['Ti']='Ti_sv' ['V']='V_sv'   ['Cr']='Cr_pv' ['Mn']='Mn_pv' ['Fe']='Fe'    ['Co']='Co'    ['Ni']='Ni'   ['Cu']='Cu'   ['Zn']='Zn'
+               ['Y']='Y_sv'   ['Zr']='Zr_sv' ['Nb']='Nb_sv' ['Mo']='Mo_sv' ['Tc']='Tc_pv' ['Ru']='Ru_pv' ['Rh']='Rh_pv' ['Pd']='Pd'   ['Ag']='Ag'   ['Cd']='Cd'
+               ['La']='La'    ['Hf']='Hf_pv' ['Ta']='Ta_pv' ['W']='W_pv'   ['Re']='Re'    ['Os']='Os'    ['Ir']='Ir'    ['Pt']='Pt'   ['Au']='Au'   ['Hg']='Hg'
+               ['Ac']='Ac'
+
+['Ce']='Ce'    ['Pr']='Pr_3'  ['Nd']='Nd_3'  ['Pm']='Pm_3'  ['Sm']='Sm_3'  ['Eu']='Eu_2'  ['Gd']='Gd_3'  ['Tb']='Tb_3'  ['Dy']='Dy_3' ['Ho']='Ho_3' ['Er']='Er_3' ['Tm']='Tm_3' ['Yb']='Yb_2' ['Lu']='Lu_3'
+['Th']='Th'    ['Pa']='Pa'    ['U']='U'      ['Np']='Np'    ['Pu']='Pu'    ['Am']='Am'    ['Cm']='Cm')
+
+i=2
+while true; do
+    if [[ -n ${@:$i:1} ]] && [[ -n ${@:$(($i+1)):1} ]] ; then
+        potcars[${@:$i:1}]=${@:$(($i+1)):1}
+        i+=2
+    else
+        break
+    fi
+done
+
+# Reading
+
+atoms=()
+elements=($(head -6 POSCAR | tail -1) ' dummy')
+
+# Writing
+
+for atom in ${elements[@]}; do
+    if [[ $atom == 'dummy' ]]; then
+        break
+    fi
+    for i in ${!potcars[@]}; do
+        if [[ $atom == $i ]]; then
+            atoms+="${pawdir[${1:-'vasp'}]}/${potcars[$atom]}/POTCAR "
+            break
+        fi
+    done
+done
+cat $atoms > POTCAR
